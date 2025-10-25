@@ -1,0 +1,75 @@
+import { chromium, Browser, Page } from 'playwright';
+import fs from 'fs';
+import path from 'path';
+
+let browser: Browser;
+let page: Page;
+
+const SCREENSHOT_PATH = path.join(__dirname, '../../screenshots/video.png');
+
+describe('YouTube E2E Test', () => {
+  beforeAll(async () => {
+    browser = await chromium.launch({ headless: true });
+    page = await browser.newPage();
+  });
+
+  afterAll(async () => {
+    await browser.close();
+  });
+
+  test('Search, play, pause, seek, screenshot, and verify title', async () => {
+    await page.goto('https://www.youtube.com');
+    await page.waitForSelector('input#search');
+
+    // Search for keyword
+    await page.fill('input#search', 'QA automation');
+    await page.keyboard.press('Enter');
+
+    await page.waitForSelector('ytd-video-renderer', { timeout: 10000 });
+    const results = await page.$$('ytd-video-renderer');
+    expect(results.length).toBeGreaterThan(0);
+
+    // Click first video
+    await results[0].click();
+    await page.waitForSelector('video', { timeout: 10000 });
+
+    const video = page.locator('video');
+    await video.waitFor();
+
+    // Ensure video starts playing
+    await page.waitForTimeout(3000);
+    let isPaused = await video.evaluate(v => v.paused);
+    if (isPaused) {
+      await video.evaluate(v => v.play());
+      await page.waitForTimeout(2000);
+    }
+
+    isPaused = await video.evaluate(v => v.paused);
+    expect(isPaused).toBe(false);
+
+    // Pause video
+    await video.evaluate(v => v.pause());
+    await page.waitForTimeout(1000);
+    const pausedAfter = await video.evaluate(v => v.paused);
+    expect(pausedAfter).toBe(true);
+
+    // Seek to later point
+    const duration = await video.evaluate(v => v.duration);
+    await video.evaluate(v => (v.currentTime = Math.min(v.duration - 10, 30)));
+    await page.waitForTimeout(1000);
+    const currentTime = await video.evaluate(v => v.currentTime);
+    expect(currentTime).toBeGreaterThan(0);
+    expect(currentTime).toBeLessThanOrEqual(duration);
+
+    // Play and take screenshot
+    await video.evaluate(v => v.play());
+    await page.waitForTimeout(2000);
+    await page.screenshot({ path: SCREENSHOT_PATH });
+
+    expect(fs.existsSync(SCREENSHOT_PATH)).toBe(true);
+
+    // Verify video title
+    const title = await page.textContent('h1.title');
+    expect(title?.trim().length).toBeGreaterThan(0);
+  });
+});
